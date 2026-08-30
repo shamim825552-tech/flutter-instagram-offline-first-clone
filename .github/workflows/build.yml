@@ -29,11 +29,16 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Create .env file
+      - name: Create env files
         run: |
-          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
-          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
-          echo "POWERSYNC_URL=${{ secrets.POWERSYNC_URL }}" >> .env
+          for name in .env .env.dev .env.development .env.prod .env.production; do
+            echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> "$name"
+            echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> "$name"
+            echo "POWERSYNC_URL=${{ secrets.POWERSYNC_URL }}" >> "$name"
+            echo "FCM_SERVER_KEY=placeholder" >> "$name"
+            echo "IOS_CLIENT_ID=placeholder" >> "$name"
+            echo "WEB_CLIENT_ID=placeholder" >> "$name"
+          done
         continue-on-error: true
 
       - name: Add google-services.json
@@ -45,7 +50,6 @@ jobs:
 
       - name: Run build_runner (code generation)
         run: dart run build_runner build --delete-conflicting-outputs
-        continue-on-error: true
 
       - name: Build APK
         run: flutter build apk --release --flavor production -t lib/main_production.dart
