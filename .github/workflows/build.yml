@@ -31,13 +31,15 @@ jobs:
 
       - name: Create env files
         run: |
-          for name in .env .env.dev .env.development .env.prod .env.production; do
-            echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> "$name"
-            echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> "$name"
-            echo "POWERSYNC_URL=${{ secrets.POWERSYNC_URL }}" >> "$name"
-            echo "FCM_SERVER_KEY=placeholder" >> "$name"
-            echo "IOS_CLIENT_ID=placeholder" >> "$name"
-            echo "WEB_CLIENT_ID=placeholder" >> "$name"
+          for dir in . packages/env; do
+            for name in .env .env.dev .env.development .env.prod .env.production; do
+              echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> "$dir/$name"
+              echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> "$dir/$name"
+              echo "POWERSYNC_URL=${{ secrets.POWERSYNC_URL }}" >> "$dir/$name"
+              echo "FCM_SERVER_KEY=placeholder" >> "$dir/$name"
+              echo "IOS_CLIENT_ID=placeholder" >> "$dir/$name"
+              echo "WEB_CLIENT_ID=placeholder" >> "$dir/$name"
+            done
           done
         continue-on-error: true
 
@@ -45,10 +47,20 @@ jobs:
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > android/app/google-services.json
         continue-on-error: true
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Activate Melos
+        run: dart pub global activate melos
 
-      - name: Run build_runner (code generation)
+      - name: Melos bootstrap
+        run: |
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos bootstrap
+
+      - name: Run build_runner in env package
+        run: |
+          cd packages/env
+          dart run build_runner build --delete-conflicting-outputs
+
+      - name: Run build_runner in root (main app)
         run: dart run build_runner build --delete-conflicting-outputs
 
       - name: Build APK
