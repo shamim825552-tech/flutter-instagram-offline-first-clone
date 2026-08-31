@@ -73,6 +73,10 @@ jobs:
           }
           JSONEOF
 
+      - name: Use debug signing for release build (temporary)
+        run: |
+          sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/' android/app/build.gradle
+
       - name: Build env package
         run: |
           cd packages/env
