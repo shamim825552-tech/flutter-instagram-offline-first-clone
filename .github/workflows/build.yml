@@ -83,6 +83,13 @@ jobs:
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
+      - name: DEBUG - Show generated env file
+        run: |
+          echo "===== env.prod.g.dart ====="
+          cat packages/env/lib/src/env.prod.g.dart || echo "FILE NOT FOUND"
+          echo "===== env.dev.g.dart ====="
+          cat packages/env/lib/src/env.dev.g.dart || echo "FILE NOT FOUND"
+
       - name: Install root dependencies
         run: flutter pub get
 
