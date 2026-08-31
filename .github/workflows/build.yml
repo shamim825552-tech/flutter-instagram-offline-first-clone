@@ -43,6 +43,17 @@ jobs:
           done
         continue-on-error: true
 
+      - name: DEBUG - Show raw env file (masked)
+        run: |
+          echo "===== root .env.production ====="
+          sed 's/\(SUPABASE_URL=.\{15\}\).*/\1.../' .env.production
+          sed 's/\(SUPABASE_ANON_KEY=.\{15\}\).*/\1.../' .env.production
+          echo "===== packages/env/.env.production ====="
+          sed 's/\(SUPABASE_URL=.\{15\}\).*/\1.../' packages/env/.env.production
+          sed 's/\(SUPABASE_ANON_KEY=.\{15\}\).*/\1.../' packages/env/.env.production
+          echo "===== character count check ====="
+          wc -l .env.production packages/env/.env.production
+
       - name: Create placeholder google-services.json
         run: |
           cat > android/app/google-services.json << 'JSONEOF'
@@ -82,13 +93,6 @@ jobs:
           cd packages/env
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
-
-      - name: DEBUG - Show generated env file
-        run: |
-          echo "===== env.prod.g.dart ====="
-          cat packages/env/lib/src/env.prod.g.dart || echo "FILE NOT FOUND"
-          echo "===== env.dev.g.dart ====="
-          cat packages/env/lib/src/env.dev.g.dart || echo "FILE NOT FOUND"
 
       - name: Install root dependencies
         run: flutter pub get
