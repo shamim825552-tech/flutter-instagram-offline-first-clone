@@ -78,7 +78,19 @@ class _FeedViewState extends State<FeedView>
   @override
   void initState() {
     super.initState();
-    context.read<FeedBloc>().add(const FeedPageRequested(page: 0));
+    // FIX: Only fetch the first feed page if the feed isn't already
+    // populated. Without this guard, navigating back to the home tab
+    // while a post is still being created/uploaded (see
+    // FeedPageController.processPostMedia, which navigates home BEFORE
+    // the upload finishes) re-triggers initState, which re-dispatches
+    // FeedPageRequested(page: 0) -> FeedRefreshRequested. That refresh
+    // runs concurrently with FeedPostCreateRequested and, since it's
+    // slower, finishes later and overwrites the freshly-created post
+    // with a stale full refetch a moment after it correctly appeared.
+    final feedBloc = context.read<FeedBloc>();
+    if (feedBloc.state.feed.feedPage.blocks.isEmpty) {
+      feedBloc.add(const FeedPageRequested(page: 0));
+    }
 
     _nestedScrollController = ScrollController();
     FeedPageController().init(
