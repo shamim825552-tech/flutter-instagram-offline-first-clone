@@ -62,8 +62,18 @@ class FeedView extends StatefulWidget {
   State<FeedView> createState() => _FeedViewState();
 }
 
-class _FeedViewState extends State<FeedView> {
+class _FeedViewState extends State<FeedView>
+    with AutomaticKeepAliveClientMixin {
   late ScrollController _nestedScrollController;
+
+  // FIX: Keep this widget's state alive when it's scrolled/navigated away
+  // from (e.g. when the user goes to the "create post" page and comes
+  // back). Without this, Flutter may dispose and recreate FeedView,
+  // which re-runs initState() below and re-fetches the feed from the
+  // database, overwriting the freshly (optimistically) created post
+  // with stale/incomplete data a second or so later.
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -85,6 +95,8 @@ class _FeedViewState extends State<FeedView> {
 
   @override
   Widget build(BuildContext context) {
+    // FIX: Required by AutomaticKeepAliveClientMixin.
+    super.build(context);
     return AppScaffold(
       releaseFocus: true,
       body: NestedScrollView(
