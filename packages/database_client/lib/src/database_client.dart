@@ -6,7 +6,6 @@ import 'dart:isolate';
 import 'package:dio/dio.dart';
 import 'package:env/env.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:powersync_repository/powersync_repository.dart';
 import 'package:shared/shared.dart';
 import 'package:user_repository/user_repository.dart';
@@ -395,11 +394,14 @@ SELECT * FROM profiles WHERE id = ?
     final author = User.fromJson(result.last as Row);
     final jsonMedia = json['media'] as String;
 
-    final rootToken = RootIsolateToken.instance!;
-    final mediaResult = await compute(_computeJsonMedia, [
-      rootToken,
-      jsonMedia,
-    ]);
+    // FIX: Removed the `compute()` isolate spawn for this JSON decode.
+    // Decoding a single post's small media JSON string is fast and does
+    // not need a separate isolate. Spawning an isolate here added fragility
+    // (RootIsolateToken/BackgroundIsolateBinaryMessenger initialization can
+    // fail silently in some builds) without any real performance benefit,
+    // and any failure here would bubble up and leave the feed stuck on
+    // its loading skeleton forever.
+    final mediaResult = _decodeJsonMedia(jsonMedia);
     final postMedia = List<Media>.from(
       mediaResult.map(Media.fromJson).toList(),
     );
@@ -445,19 +447,16 @@ ORDER BY created_at DESC
       ''',
           parameters: [userId ?? currentUserId],
         )
-        .asyncMap(
-          (result) async {
+        .map(
+          (result) {
+            // FIX: Removed the `compute()` isolate spawn here as well - see
+            // the note in `createPost` above for why.
             final jsonListMedia = result.map((row) {
               final json = Map<String, dynamic>.from(row);
-              return json['media'] as String;
+              return json['media'] as String?;
             }).toList();
 
-            final rootToken = RootIsolateToken.instance!;
-            final media =
-                await compute<List<dynamic>, List<List<Map<String, dynamic>>>>(
-                  _computeJsonListMedia,
-                  [rootToken, jsonListMedia],
-                );
+            final media = _decodeJsonListMedia(jsonListMedia);
 
             final posts = <Post>[];
             for (var i = 0; i < result.length; i++) {
@@ -483,13 +482,16 @@ ORDER BY created_at DESC
     return result.first['id'] as String;
   }
 
-  static List<List<Map<String, dynamic>>> _computeJsonListMedia(
-    List<dynamic> args,
+  // FIX: Plain, synchronous, main-isolate JSON decode helpers. These
+  // replace the previous `compute()`-based isolate versions
+  // (`_computeJsonListMedia` / `_computeJsonMedia`), which could silently
+  // fail to initialize their background isolate and leave any calling
+  // Future/Stream stuck without ever emitting a value or an error the UI
+  // could recover from.
+  static List<List<Map<String, dynamic>>> _decodeJsonListMedia(
+    List<String?> jsonListMedia,
   ) {
-    final rootToken = args[0] as RootIsolateToken;
-    BackgroundIsolateBinaryMessenger.ensureInitialized(rootToken);
-    final jsonListMedia = args[1] as List<String?>;
-    final listMedia = jsonListMedia
+    return jsonListMedia
         .map(
           (jsonMedia) =>
               (jsonMedia == null
@@ -498,20 +500,11 @@ ORDER BY created_at DESC
                   .cast<Map<String, dynamic>>(),
         )
         .toList();
-
-    return listMedia;
   }
 
-  static List<Map<String, dynamic>> _computeJsonMedia(
-    List<dynamic> args,
-  ) {
-    final rootToken = args[0] as RootIsolateToken;
-    BackgroundIsolateBinaryMessenger.ensureInitialized(rootToken);
-    final jsonMedia = args[1] as String;
-    final listMedia = (jsonDecode(jsonMedia) as List<dynamic>)
+  static List<Map<String, dynamic>> _decodeJsonMedia(String jsonMedia) {
+    return (jsonDecode(jsonMedia) as List<dynamic>)
         .cast<Map<String, dynamic>>();
-
-    return listMedia;
   }
 
   @override
@@ -520,33 +513,6 @@ ORDER BY created_at DESC
     required int limit,
     bool onlyReels = false,
   }) async {
-    //     if (onlyReels) {
-    //       final result = await _powerSyncRepository.db().execute(
-    //         '''
-    // SELECT
-    //   posts.*,
-    //   p.id as user_id,
-    //   p.avatar_url as avatar_url,
-    //   p.username as username
-    // FROM
-    //   posts
-    //   inner join profiles p on posts.user_id = p.id
-    // WHERE array_length(array(posts.media), 1) = 1
-    //   AND posts.media.type = '__video_media__'
-    // LIMIT ?1 OFFSET ?2
-    //     ''',
-    //         [limit, offset],
-    //       );
-
-    //       final posts = <Post>[];
-
-    //       for (final row in result) {
-    //         final json = Map<String, dynamic>.from(row);
-    //         final post = Post.fromJson(json);
-    //         posts.add(post);
-    //       }
-    //       return posts;
-    //     }
     final result = await _powerSyncRepository.db().execute(
       '''
 SELECT
@@ -568,14 +534,12 @@ ORDER BY created_at DESC LIMIT ?1 OFFSET ?2
     );
     final jsonListMedia = result.map((row) {
       final json = Map<String, dynamic>.from(row);
-      return json['media'] as String;
+      return json['media'] as String?;
     }).toList();
 
-    final rootToken = RootIsolateToken.instance!;
-    final media = await compute(
-      _computeJsonListMedia,
-      [rootToken, jsonListMedia],
-    );
+    // FIX: See note in `createPost` above - removed `compute()` isolate
+    // spawn for this JSON decode.
+    final media = _decodeJsonListMedia(jsonListMedia);
 
     final posts = <Post>[];
     for (var i = 0; i < result.length; i++) {
@@ -587,27 +551,6 @@ ORDER BY created_at DESC LIMIT ?1 OFFSET ?2
       posts.add(post);
     }
     return posts;
-    // final result = await _powerSyncRepository.db().execute(
-    //           '''
-    // SELECT
-    //   posts.*,
-    //   p.id as user_id,
-    //   p.avatar_url as avatar_url,
-    //   p.username as username,
-    //   p.full_name as full_name
-    // FROM
-    //   posts
-    //   inner join profiles p on posts.user_id = p.id
-    // ORDER BY created_at DESC LIMIT ?1 OFFSET ?2
-    //     ''',
-    //           [limit, offset],
-    //         );
-
-    //     final instaBlocks = result.map((row) {
-    //       final json = Map<String, dynamic>.from(row);
-    //       return Post.fromJson(json);
-    //     }).toList();
-    // return result;
   }
 
   @override
@@ -627,8 +570,8 @@ RETURNING *
     final json = Map<String, dynamic>.from(row.first);
     final jsonMedia = json['media'] as String;
 
-    final rootToken = RootIsolateToken.instance!;
-    final result = await compute(_computeJsonMedia, [rootToken, jsonMedia]);
+    // FIX: See note in `createPost` above.
+    final result = _decodeJsonMedia(jsonMedia);
     final media = List<Media>.from(result.map(Media.fromJson).toList());
     return Post.fromJson(json, media: media);
   }
@@ -694,11 +637,8 @@ WHERE posts.id = ?
     final json = Map<String, dynamic>.from(row);
     final jsonMedia = json['media'] as String;
 
-    final rootToken = RootIsolateToken.instance!;
-    final mediaResult = await compute(_computeJsonMedia, [
-      rootToken,
-      jsonMedia,
-    ]);
+    // FIX: See note in `createPost` above.
+    final mediaResult = _decodeJsonMedia(jsonMedia);
     final postMedia = List<Media>.from(
       mediaResult.map(Media.fromJson).toList(),
     );
@@ -1214,17 +1154,16 @@ order by created_at asc
 ''',
             parameters: [chatId],
           )
-          .asyncMap(
-            (result) async {
+          .map(
+            (result) {
               final messages = <Message>[];
               if (result.isEmpty) return messages;
+              // FIX: See note in `createPost` above - removed `compute()`
+              // isolate spawn for this JSON decode.
               final listMediaJson = result
                   .map((e) => e['shared_post_media'] as String?)
                   .toList();
-              final resultMedia = await compute(
-                _computeJsonListMedia,
-                [RootIsolateToken.instance!, listMediaJson],
-              );
+              final resultMedia = _decodeJsonListMedia(listMediaJson);
               for (var i = 0; i < result.length; i++) {
                 final json = Map<String, dynamic>.from(result[i]);
                 final indexedMedia = resultMedia[i];
@@ -1295,42 +1234,6 @@ insert into
     required String chatId,
     required String userId,
   }) async {
-    //     final participants = (await _powerSyncRepository.db().get(
-    //       '''
-    // select
-    //   count(*) as participants_count
-    // from
-    //   participants
-    // where conversation_id = ?
-    // ''',
-    //       [chatId],
-    //     ))['participants_count'] as int;
-    //     if (participants >= 1) {
-    //       final isParticipantInConversation = await _powerSyncRepository.db()
-    // .get(
-    //         '''
-    // select
-    //   *
-    // from
-    //   participants
-    // where
-    //   user_id = ?
-    //   and conversation_id = ?
-    //   ''',
-    //         [userId, chatId],
-    //       );
-    //       if (isParticipantInConversation.isEmpty) return;
-    //       await _powerSyncRepository.db().execute(
-    //         '''
-    // delete from participants
-    // where
-    //   user_id = ?
-    //   and conversation_id = ?
-    // ''',
-    //         [userId, chatId],
-    //       );
-    //       return;
-    //     }
     await _powerSyncRepository.db().execute(
       '''
 delete from conversations
@@ -1819,10 +1722,9 @@ LIMIT ?2 OFFSET ?3
         !listMediaJson.any((element) => element != null)) {
       return result.safeMap(Message.fromRow).toList(growable: false);
     }
-    final resultMedia = await compute(
-      _computeJsonListMedia,
-      [RootIsolateToken.instance!, listMediaJson],
-    );
+    // FIX: See note in `createPost` above - removed `compute()` isolate
+    // spawn for this JSON decode.
+    final resultMedia = _decodeJsonListMedia(listMediaJson);
     for (var i = 0; i < result.length; i++) {
       final json = Map<String, dynamic>.from(result[i]);
       final indexedMedia = resultMedia[i];
