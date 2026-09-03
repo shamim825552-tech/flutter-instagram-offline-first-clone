@@ -218,17 +218,17 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> with FeedBlocMixin {
         caption: event.caption,
         media: json.encode(event.media),
       );
+      // FIX: Instead of relying on FeedUpdateRequested's fragile in-memory
+      // merge (which can silently fail and leave the UI stuck on the
+      // loading skeleton forever), do a full, clean refetch of the feed
+      // from the database now that the post has been successfully
+      // created and confirmed saved. This guarantees the UI always shows
+      // the exact same data we've verified is correct in Supabase.
       if (newPost != null) {
-        add(
-          FeedUpdateRequested(
-            update: FeedPageUpdate(
-              newPost: newPost,
-              type: PageUpdateType.create,
-            ),
-          ),
-        );
+        add(const FeedRefreshRequested());
+      } else {
+        emit(state.populated());
       }
-      emit(state.populated());
       toggleLoadingIndeterminate(enable: false);
       openSnackbar(
         const SnackbarMessage.success(title: 'Successfully created post!'),
