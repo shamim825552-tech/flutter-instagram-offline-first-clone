@@ -278,20 +278,48 @@ mixin FeedBlocMixin on Bloc<FeedEvent, FeedState> {
     required bool hasMore,
     required List<InstaBlock> blocks,
   }) async {
-    final sponsoredBlocksStringJson = firebaseRemoteConfigRepository
-        .fetchRemoteData('sponsored_blocks');
+    try {
+      final sponsoredBlocksStringJson = firebaseRemoteConfigRepository
+          .fetchRemoteData('sponsored_blocks');
 
-    final receivePort = ReceivePort();
-    final isolate = await Isolate.spawn(_computeSponsoredBlocks, [
-      receivePort.sendPort,
-      hasMore,
-      blocks,
-      sponsoredBlocksStringJson,
-    ]);
-    isolate.kill(priority: Isolate.immediate);
+      final receivePort = ReceivePort();
+      final isolate = await Isolate.spawn(_computeSponsoredBlocks, [
+        receivePort.sendPort,
+        hasMore,
+        blocks,
+        sponsoredBlocksStringJson,
+      ]);
+      isolate.kill(priority: Isolate.immediate);
 
-    final insertedBlocks = await receivePort.first as List<InstaBlock>;
-    return insertedBlocks;
+      // FIX: This app has no Firebase Remote Config values set up, so
+      // `fetchRemoteData('sponsored_blocks')` can return empty/invalid
+      // JSON. When that happens, the spawned isolate throws while
+      // decoding it and dies WITHOUT ever sending anything back through
+      // `receivePort`. That leaves `await receivePort.first` waiting
+      // forever with no error and no result - which is why the feed
+      // bloc handler never reaches its final `emit(state.populated())`
+      // call, and the UI is stuck showing the loading skeleton forever
+      // with no visible error anywhere.
+      //
+      // Adding a timeout here means: if the isolate doesn't respond
+      // within 3 seconds (plenty of time for a local decode), we give up
+      // on sponsored blocks and just show the real posts instead of
+      // hanging forever.
+      final insertedBlocks =
+          await receivePort.first.timeout(const Duration(seconds: 3))
+              as List<InstaBlock>;
+      return insertedBlocks;
+    } catch (error, stackTrace) {
+      // FIX: Any failure here (timeout, isolate crash, bad Firebase
+      // config, etc.) should never break the whole feed. Fall back to
+      // showing the plain post list without sponsored blocks.
+      logE(
+        'Failed to insert sponsored blocks, showing feed without them',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return blocks;
+    }
   }
 
   /// Computes the sponsored blocks based on the given arguments.
