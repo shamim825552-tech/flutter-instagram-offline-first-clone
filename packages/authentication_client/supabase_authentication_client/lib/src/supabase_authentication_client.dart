@@ -24,10 +24,6 @@ class SupabaseAuthenticationClient implements AuthenticationClient {
   final PowerSyncRepository _powerSyncRepository;
   final GoogleSignIn _googleSignIn;
 
-  /// Stream of [AuthenticationUser] which will emit the current user when
-  /// the authentication state changes.
-  ///
-  /// Emits [AuthenticationUser.anonymous] if the user is not authenticated.
   @override
   Stream<AuthenticationUser> get user {
     return _powerSyncRepository.authStateChanges().map((state) {
@@ -62,45 +58,20 @@ class SupabaseAuthenticationClient implements AuthenticationClient {
     }
   }
 
-  /// Starts the Sign In with Google Flow.
-  ///
-  /// Throws a [LogInWithGoogleCanceled] if the flow is canceled by the user.
-  /// Throws a [LogInWithGoogleFailure] if an exception occurs.
   @override
   Future<void> logInWithGoogle() async {
     try {
-      final googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        throw const LogInWithGoogleCanceled(
-          'Sign in with Google canceled. No user found!',
-        );
-      }
-      final googleAuth = await googleUser.authentication;
-      final accessToken = googleAuth.accessToken;
-      final idToken = googleAuth.idToken;
-      if (accessToken == null) {
-        throw const LogInWithGoogleFailure('No Access Token found.');
-      }
-      if (idToken == null) {
-        throw const LogInWithGoogleFailure('No ID Token found.');
-      }
-
-      await _powerSyncRepository.supabase.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: idToken,
-        accessToken: accessToken,
+      await _powerSyncRepository.supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb
+            ? null
+            : 'io.supabase.flutterquickstart://login-callback/',
       );
-    } on LogInWithGoogleCanceled {
-      rethrow;
     } catch (error, stackTrace) {
       Error.throwWithStackTrace(LogInWithGoogleFailure(error), stackTrace);
     }
   }
 
-  /// Starts the Sign In with Github Flow.
-  ///
-  /// Throws a [LogInWithGithubCanceled] if the flow is canceled by the user.
-  /// Throws a [LogInWithGithubFailure] if an exception occurs.
   @override
   Future<void> logInWithGithub() async {
     try {
@@ -141,7 +112,7 @@ class SupabaseAuthenticationClient implements AuthenticationClient {
         data: data,
         emailRedirectTo: kIsWeb
             ? null
-            : 'io._powerSyncRepository.supabase.flutterquickstart://login-callback/',
+            : 'io.supabase.flutterquickstart://login-callback/',
       );
     } catch (error, stackTrace) {
       Error.throwWithStackTrace(SignUpWithPasswordFailure(error), stackTrace);
@@ -183,10 +154,6 @@ class SupabaseAuthenticationClient implements AuthenticationClient {
     }
   }
 
-  /// Signs out the current user which will emit
-  /// [AuthenticationUser.anonymous] from the [user] Stream.
-  ///
-  /// Throws a [LogOutFailure] if an exception occurs.
   @override
   Future<void> logOut() async {
     try {
@@ -198,7 +165,6 @@ class SupabaseAuthenticationClient implements AuthenticationClient {
     }
   }
 
-  /// Updates the user token in [TokenStorage] if the user is authenticated.
   Future<void> _onUserChanged(AuthenticationUser user) async {
     if (!user.isAnonymous) {
       await _tokenStorage.saveToken(user.id);
